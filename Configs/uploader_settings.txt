@@ -1,0 +1,14 @@
+working_dir=
+log_file=
+google_drive_client_secrets_json=
+google_drive_settings_yaml=
+google_drive_token_pickle=
+google_drive_folder_id=
+keep_files_for_days=
+deduplicate=
+email_recipients=
+email_name=
+email_address=
+email_smtp=
+email_port=
+email_ssl=
