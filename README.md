@@ -31,6 +31,27 @@ Crawl geo-tagged streaming tweets.
 5. Put the 2 configuration text files under `/data/TweetCrawler/Configs/`.
     - You may use alternative path and name.
 
+6. Set permissions. We want the everything in the folder, including the scripts, log files, and crawled tweets to be accessible to everyone, except for the configurations.
+
+    - Make the folders accessible:
+
+        ```bash
+        sudo chmod 0777 /data/TweetCrawler /data/TweetCrawler/Logs /data/TweetCrawler/Scripts /data/TweetCrawler/Tweets /data/TweetCrawler/venv
+        ```
+
+    - Make the scripts executable:
+
+        ```bash
+        sudo chmod 0755 /data/TweetCrawler/Scripts/TweetCrawler.py /data/TweetCrawler/Scripts/UploaderAndSweeper.py
+        ```
+
+    - Make the configs only accessible by you (and sudoers):
+
+        ```bash
+        sudo chmod 0700 /data/TweetCrawler/Configs
+        sudo chmod 0600 /data/TweetCrawler/Configs/*
+        ```
+
 ## Twitter Authentication
 
 Please see [https://docs.tweepy.org/en/latest/authentication.html](https://docs.tweepy.org/en/latest/authentication.html).
