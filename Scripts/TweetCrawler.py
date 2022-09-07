@@ -32,10 +32,7 @@ if not os.path.isfile(__setting_path):
 KEY_WORKING_DIR = "working_dir"
 KEY_NUM_THREADS = "num_threads"
 KEY_LOG_File = "log_file"
-KEY_TWITTER_CONSUMER_KEY = "twitter_consumer_key"
-KEY_TWITTER_CONSUMER_SECRET = "twitter_consumer_secret"
-KEY_TWITTER_ACCESS_KEY = "twitter_access_key"
-KEY_TWITTER_ACCESS_SECRET = "twitter_access_secret"
+KEY_TWITTER_BEAR_TOKEN = "twitter_bear_token"
 KEY_EMAIL_ADDRESS = "email_address"
 KEY_EMAIL_NAME = "email_name"
 KEY_EMAIL_PASSWORD = "email_password"
@@ -65,10 +62,7 @@ __num_threads = 1
 __log_path = None
 __log_file = None
 __log_lock = None
-__twitter_consumer_key = None
-__twitter_consumer_secret = None
-__twitter_access_key = None
-__twitter_access_secret = None
+__twitter_bear_token = None
 __email_address = None
 __email_name = None
 __email_password = None
@@ -103,14 +97,8 @@ try:
                     __log_path = None
                     __log_file = None
                     __log_lock = None
-            elif key == KEY_TWITTER_CONSUMER_KEY:
-                __twitter_consumer_key = val
-            elif key == KEY_TWITTER_CONSUMER_SECRET:
-                __twitter_consumer_secret = val
-            elif key == KEY_TWITTER_ACCESS_KEY:
-                __twitter_access_key = val
-            elif key == KEY_TWITTER_ACCESS_SECRET:
-                __twitter_access_secret = val
+            elif key == KEY_TWITTER_BEAR_TOKEN:
+                __twitter_bear_token = val
             elif key == KEY_EMAIL_ADDRESS:
                 __email_address = val
             elif key == KEY_EMAIL_NAME:
@@ -150,27 +138,9 @@ if not os.path.isdir(__working_dir):
               file = sys.stderr)
         sys.exit(-1)
 
-if __twitter_consumer_key is None or len(__twitter_consumer_key) == 0:
-    print(f"{KEY_TWITTER_CONSUMER_KEY} is not set", file = sys.stderr)
+if __twitter_bear_token is None or len(__twitter_bear_token) == 0:
+    print(f"{KEY_TWITTER_BEAR_TOKEN} is not set", file = sys.stderr)
     sys.exit(-1)
-
-if __twitter_consumer_secret is None or len(__twitter_consumer_secret) == 0:
-    print(f"{KEY_TWITTER_CONSUMER_SECRET} is not set", file = sys.stderr)
-    sys.exit(-1)
-
-if __twitter_access_key is None or len(__twitter_access_key) == 0:
-    print(f"{KEY_TWITTER_ACCESS_KEY} is not set", file = sys.stderr)
-    sys.exit(-1)
-
-if __twitter_access_secret is None or len(__twitter_access_secret) == 0:
-    print(f"{KEY_TWITTER_ACCESS_SECRET} is not set", file = sys.stderr)
-    sys.exit(-1)
-
-# Twitter authentication
-__twitter_auth = tweepy.OAuthHandler(__twitter_consumer_key,
-                                     __twitter_consumer_secret)
-__twitter_auth.set_access_token(__twitter_access_key, __twitter_access_secret)
-__twitter_api = tweepy.API(__twitter_auth)
 
 # Email
 if __email_address is None or len(__email_address) == 0 \
@@ -344,23 +314,48 @@ def close_all_files() -> None:
     __file_lock.release()
 
 
+def trim_json(jobj) -> bool:
+    """ Remove any empty fields in a json object recursively. """
+    if jobj is None:
+        return True
+    if type(jobj) is dict:
+        keys = list(jobj.keys())
+        for key in keys:
+            if trim_json(jobj[key]):
+                del jobj[key]
+        return len(jobj) == 0
+    if type(jobj) is list:
+        for i in range(len(jobj) - 1, -1, -1):
+            if trim_json(jobj[i]):
+                del jobj[i]
+        return len(jobj) == 0
+    if type(jobj) is str:
+        return len(jobj) == 0
+    return False
+
+
 def save_tweet(data: str) -> bool:
     """ Save crawled tweets to file in thread-safe way """
-    if data.startswith("{\"limit\":{") or ("\"created_at\":" not in data):
+    try:
+        tweet = json.loads(data)
+    except ValueError:
+        return False
+    if "data" not in tweet or "text" not in tweet["data"]:
         # Filter none Tweets
         return False
-
-    tweet = data.rstrip("\n").rstrip("\r") + "\n"
-    start_idx = tweet.index("\"created_at\":")
-    time_str = tweet[start_idx + 14:start_idx + 44]
-    timestamp = datetime.strptime(time_str, "%a %b %d %H:%M:%S +0000 %Y")
+    del tweet["matching_rules"]
+    if trim_json(tweet):
+        return False
+    data = json.dumps(tweet, separators = (",", ":"), sort_keys = True) + "\n"
+    timestamp = datetime.strptime(tweet["data"]["created_at"],
+                                  "%Y-%m-%dT%H:%M:%S.%fZ")
     file, lock = create_or_get_file(timestamp)
     lock.acquire()
     if file.closed:
         lock.release()
         return False
     try:
-        file.write(tweet)  # Save the crawled tweet
+        file.write(data)  # Save the crawled tweet
     except BaseException as ex:
         lock.release()
         write_log(f"Error on_data: {ex}", True)
@@ -369,20 +364,109 @@ def save_tweet(data: str) -> bool:
     return True
 
 
-class CrawlerStream(tweepy.Stream):
+class CrawlerStream(tweepy.StreamingClient):
     """ Custom class for steaming Tweets """
 
-    def __init__(self, consumer_key: str, consumer_secret: str,
-                 access_token: str, access_token_secret: str,
+    def __init__(self, bearer_token: str,
                  save_func: Callable, log_func: Callable):
         """ Keyword arguments:
         save_func -- thread-safe function to write tweet to file
         log_func -- thread-safe function to write to log
         """
-        super(CrawlerStream, self).__init__(consumer_key, consumer_secret,
-                                            access_token, access_token_secret)
+        super(CrawlerStream, self).__init__(bearer_token,
+                                            wait_on_rate_limit = True)
         self.__saveFunc = save_func
         self.__logFunc = log_func
+        self.__expansions = [
+            "author_id",
+            "referenced_tweets.id",
+            "in_reply_to_user_id",
+            "attachments.media_keys",
+            "attachments.poll_ids",
+            "geo.place_id",
+            "entities.mentions.username",
+            "referenced_tweets.id.author_id",
+        ]
+
+        # https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/media
+        self.__media_fields = [
+            "media_key",
+            "type",
+            "url",
+            "duration_ms",
+            "height",
+            # "non_public_metrics",
+            # "organic_metrics",
+            "preview_image_url",
+            # "promoted_metrics",
+            "public_metrics",
+            "width",
+            "alt_text",
+            "variants",
+        ]
+
+        # https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/place
+        self.__place_fields = [
+            "full_name",
+            "id",
+            "contained_within",
+            "country",
+            "country_code",
+            "geo",
+            "name",
+            "place_type",
+        ]
+
+        # https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/poll
+        self.__poll_fields = [
+            "id",
+            "options",
+            "duration_minutes",
+            "end_datetime",
+            "voting_status",
+        ]
+
+        # https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/tweet
+        self.__tweet_fields = [
+            "id",
+            "text",
+            "attachments",
+            "author_id",
+            "context_annotations",
+            "conversation_id",
+            "created_at",
+            "entities",
+            "geo",
+            "in_reply_to_user_id",
+            "lang",
+            "non_public_metrics",
+            "organic_metrics",
+            "possibly_sensitive",
+            "promoted_metrics",
+            "public_metrics",
+            "referenced_tweets",
+            "reply_settings",
+            "source",
+            "withheld",
+        ]
+
+        # https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/user
+        self.__user_fields = [
+            "id",
+            "name",
+            "username",
+            "created_at",
+            "description",
+            "entities",
+            "location",
+            "pinned_tweet_id",
+            "profile_image_url",
+            "protected",
+            "public_metrics",
+            "url",
+            "verified",
+            "withheld",
+        ]
 
     def on_exception(self, exception):
         time.sleep(5)
@@ -395,40 +479,44 @@ class CrawlerStream(tweepy.Stream):
             time.sleep(5)
         return True  # Continue crawling
 
-    def on_request_error(self, status_code: int):
-        time.sleep(5)
-        raise Exception(f"Encountered error with status code: {status_code}")
+    # def on_request_error(self, status_code: int):
+    #     time.sleep(5)
+    #     raise Exception(f"Encountered error with status code: {status_code}")
 
     def on_limit(self, track: int):
         time.sleep(5)
         raise Exception(f"Encountered rate limited {track}")
 
+    def start_filter(self):
+        self.filter(media_fields = self.__media_fields,
+                    place_fields = self.__place_fields,
+                    poll_fields = self.__poll_fields,
+                    tweet_fields = self.__tweet_fields,
+                    user_fields = self.__user_fields,
+                    expansions = self.__expansions)
+
 
 class Crawler(Thread):
     """ Run listener in thread """
 
-    def __init__(self, auth: tweepy.auth.OAuthHandler, save_func: Callable,
+    def __init__(self, bearer_token: str, save_func: Callable,
                  log_func: Callable):
         """ Keyword arguments:
-        auth -- authentication information
+        bearer_token -- bearer token information
         save_func -- thread-safe function to write tweet to file
         log_func -- thread-safe function to write to log
         """
         Thread.__init__(self)
-        self.__auth = auth
+        self.__bearer_token = bearer_token
         self.__saveFunc = save_func
         self.__logFunc = log_func
 
     def run(self):
-        sapi = CrawlerStream(self.__auth.consumer_key,
-                             self.__auth.consumer_secret,
-                             self.__auth.access_token,
-                             self.__auth.access_token_secret,
-                             self.__saveFunc,
-                             self.__logFunc)
+        cs = CrawlerStream(self.__bearer_token,
+                           self.__saveFunc,
+                           self.__logFunc)
         # Filter geo enabled Tweets
-        sapi.filter(locations = [-180, -90, 180, 90],
-                    stall_warnings = False)
+        cs.start_filter()
 
 
 def get_time() -> bool:
@@ -468,18 +556,13 @@ if __name__ == "__main__":
             send_email(f"[TweetCrawler]: {content}", content)
         try:
             if __num_threads == 1:
-                sapi = CrawlerStream(__twitter_auth.consumer_key,
-                                     __twitter_auth.consumer_secret,
-                                     __twitter_auth.access_token,
-                                     __twitter_auth.access_token_secret,
+                cs = CrawlerStream(__twitter_bear_token,
                                      save_tweet,
                                      write_log)
-                sapi.filter(
-                    locations = [-180, -90, 180, 90],
-                    stall_warnings = False)  # Filter geo enabled Tweets
+                cs.start_filter()
             else:
-                for i in range(__num_threads):
-                    Crawler(__twitter_auth, save_tweet, write_log).start()
+                for _ in range(__num_threads):
+                    Crawler(__twitter_bear_token, save_tweet, write_log).start()
         except (KeyboardInterrupt, SystemExit):
             close_all_files()
             if __log_file is not None:

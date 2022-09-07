@@ -56,14 +56,18 @@ Crawl geo-tagged streaming tweets.
 
 Please see [https://docs.tweepy.org/en/latest/authentication.html](https://docs.tweepy.org/en/latest/authentication.html).
 
-I'm using OAuth 1.0a and OAuth 2.0. Type of App `Automated App or bot`. App permissions `Read`.
+I'm using OAuth 2.0. Type of App `Automated App or bot`. App permissions `Read`, `Write` and `Direct Message`.
 
-Edit `crawler_settings.txt`, set the values (right of =) of the following options to what you get from Twitter.
+Edit `crawler_settings.txt`, set the values (right of =) of the following option to what you get from Twitter.
 
-- `twitter_consumer_key`
-- `twitter_consumer_secret`
-- `twitter_access_key`
-- `twitter_access_secret`
+- `twitter_bear_token`
+
+The following options are deprecated due to the migration from Twitter API v1.1 to v2.
+
+- ~~`twitter_consumer_key`~~
+- ~~`twitter_consumer_secret`~~
+- ~~`twitter_access_key`~~
+- ~~`twitter_access_secret`~~
 
 ## TweetCrawler Settings
 
