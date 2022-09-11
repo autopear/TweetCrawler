@@ -343,7 +343,8 @@ def save_tweet(data: str) -> bool:
     if "data" not in tweet or "text" not in tweet["data"]:
         # Filter none Tweets
         return False
-    del tweet["matching_rules"]
+    if "matching_rules" in tweet:
+        del tweet["matching_rules"]
     if trim_json(tweet):
         return False
     data = json.dumps(tweet, separators = (",", ":"), sort_keys = True) + "\n"
@@ -487,8 +488,8 @@ class CrawlerStream(tweepy.StreamingClient):
         time.sleep(5)
         raise Exception(f"Encountered rate limited {track}")
 
-    def start_filter(self):
-        self.filter(media_fields = self.__media_fields,
+    def start_sample(self):
+        self.sample(media_fields = self.__media_fields,
                     place_fields = self.__place_fields,
                     poll_fields = self.__poll_fields,
                     tweet_fields = self.__tweet_fields,
@@ -516,7 +517,7 @@ class Crawler(Thread):
                            self.__saveFunc,
                            self.__logFunc)
         # Filter geo enabled Tweets
-        cs.start_filter()
+        cs.start_sample()
 
 
 def get_time() -> bool:
@@ -556,10 +557,8 @@ if __name__ == "__main__":
             send_email(f"[TweetCrawler]: {content}", content)
         try:
             if __num_threads == 1:
-                cs = CrawlerStream(__twitter_bear_token,
-                                     save_tweet,
-                                     write_log)
-                cs.start_filter()
+                cs = CrawlerStream(__twitter_bear_token, save_tweet, write_log)
+                cs.start_sample()
             else:
                 for _ in range(__num_threads):
                     Crawler(__twitter_bear_token, save_tweet, write_log).start()
