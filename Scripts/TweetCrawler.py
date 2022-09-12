@@ -20,6 +20,98 @@ from urllib.request import urlopen
 import tweepy  # Requires Tweepy 4.0.0+
 from urllib3.exceptions import IncompleteRead as urllib3_incompleteRead
 
+# https://developer.twitter.com/en/docs/twitter-api/expansions
+FIELDS_EXPANSIONS = [
+    "author_id",
+    "referenced_tweets.id",
+    "in_reply_to_user_id",
+    "attachments.media_keys",
+    "attachments.poll_ids",
+    "geo.place_id",
+    "entities.mentions.username",
+    "referenced_tweets.id.author_id",
+]
+
+# https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/media
+FIELDS_MEDIA = [
+    "media_key",
+    "type",
+    "url",
+    "duration_ms",
+    "height",
+    # "non_public_metrics",
+    # "organic_metrics",
+    "preview_image_url",
+    # "promoted_metrics",
+    "public_metrics",
+    "width",
+    "alt_text",
+    "variants",
+]
+
+# https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/place
+FIELDS_PLACE = [
+    "full_name",
+    "id",
+    "contained_within",
+    "country",
+    "country_code",
+    "geo",
+    "name",
+    "place_type",
+]
+
+# https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/poll
+FIELDS_POLL = [
+    "id",
+    "options",
+    "duration_minutes",
+    "end_datetime",
+    "voting_status",
+]
+
+# https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/tweet
+FIELDS_TWEET = [
+    "id",
+    "text",
+    "attachments",
+    "author_id",
+    "context_annotations",
+    "conversation_id",
+    "created_at",
+    "entities",
+    "geo",
+    "in_reply_to_user_id",
+    "lang",
+    "non_public_metrics",
+    "organic_metrics",
+    "possibly_sensitive",
+    "promoted_metrics",
+    "public_metrics",
+    "referenced_tweets",
+    "reply_settings",
+    "source",
+    "withheld",
+]
+
+# https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/user
+FIELDS_USER = [
+    "id",
+    "name",
+    "username",
+    "created_at",
+    "description",
+    "entities",
+    "location",
+    "pinned_tweet_id",
+    "profile_image_url",
+    "protected",
+    "public_metrics",
+    "url",
+    "verified",
+    "withheld",
+]
+
 if len(sys.argv) != 2:
     print("Usage: {0} SETTINGS_FILE".format(os.path.basename(__file__)))
     sys.exit(0)
@@ -315,7 +407,8 @@ def close_all_files() -> None:
 
 
 def trim_json(jobj) -> bool:
-    """ Remove any empty fields in a json object recursively. """
+    """ Remove any empty fields in a json object recursively. Return True if
+    the trimmed object is None or empty. """
     if jobj is None:
         return True
     if type(jobj) is dict:
@@ -334,14 +427,28 @@ def trim_json(jobj) -> bool:
     return False
 
 
+def is_valid_tweet(tweet) -> bool:
+    if ("data" not in tweet) or ("includes" not in tweet):
+        return False
+    if ("id" not in tweet["data"]) or \
+            ("text" not in tweet["data"]) or \
+            ("author_id" not in tweet["data"]) or \
+            ("created_at" not in tweet["data"]) or \
+            ("users" not in tweet["includes"]):
+        return False
+    return True
+
+
 def save_tweet(data: str) -> bool:
     """ Save crawled tweets to file in thread-safe way """
     try:
         tweet = json.loads(data)
     except ValueError:
         return False
-    if "data" not in tweet or "text" not in tweet["data"]:
+    if not is_valid_tweet(tweet):
         # Filter none Tweets
+        non_tweet = json.dumps(tweet, separators = (",", ":"), sort_keys = True)
+        write_log(f"Non-tweet: {non_tweet}", True)
         return False
     if "matching_rules" in tweet:
         del tweet["matching_rules"]
@@ -378,96 +485,6 @@ class CrawlerStream(tweepy.StreamingClient):
                                             wait_on_rate_limit = True)
         self.__saveFunc = save_func
         self.__logFunc = log_func
-        self.__expansions = [
-            "author_id",
-            "referenced_tweets.id",
-            "in_reply_to_user_id",
-            "attachments.media_keys",
-            "attachments.poll_ids",
-            "geo.place_id",
-            "entities.mentions.username",
-            "referenced_tweets.id.author_id",
-        ]
-
-        # https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/media
-        self.__media_fields = [
-            "media_key",
-            "type",
-            "url",
-            "duration_ms",
-            "height",
-            # "non_public_metrics",
-            # "organic_metrics",
-            "preview_image_url",
-            # "promoted_metrics",
-            "public_metrics",
-            "width",
-            "alt_text",
-            "variants",
-        ]
-
-        # https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/place
-        self.__place_fields = [
-            "full_name",
-            "id",
-            "contained_within",
-            "country",
-            "country_code",
-            "geo",
-            "name",
-            "place_type",
-        ]
-
-        # https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/poll
-        self.__poll_fields = [
-            "id",
-            "options",
-            "duration_minutes",
-            "end_datetime",
-            "voting_status",
-        ]
-
-        # https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/tweet
-        self.__tweet_fields = [
-            "id",
-            "text",
-            "attachments",
-            "author_id",
-            "context_annotations",
-            "conversation_id",
-            "created_at",
-            "entities",
-            "geo",
-            "in_reply_to_user_id",
-            "lang",
-            "non_public_metrics",
-            "organic_metrics",
-            "possibly_sensitive",
-            "promoted_metrics",
-            "public_metrics",
-            "referenced_tweets",
-            "reply_settings",
-            "source",
-            "withheld",
-        ]
-
-        # https://developer.twitter.com/en/docs/twitter-api/data-dictionary/object-model/user
-        self.__user_fields = [
-            "id",
-            "name",
-            "username",
-            "created_at",
-            "description",
-            "entities",
-            "location",
-            "pinned_tweet_id",
-            "profile_image_url",
-            "protected",
-            "public_metrics",
-            "url",
-            "verified",
-            "withheld",
-        ]
 
     def on_exception(self, exception):
         time.sleep(5)
@@ -480,44 +497,18 @@ class CrawlerStream(tweepy.StreamingClient):
             time.sleep(5)
         return True  # Continue crawling
 
-    # def on_request_error(self, status_code: int):
-    #     time.sleep(5)
-    #     raise Exception(f"Encountered error with status code: {status_code}")
-
     def on_limit(self, track: int):
         time.sleep(5)
         raise Exception(f"Encountered rate limited {track}")
 
-    def start_sample(self):
-        self.sample(media_fields = self.__media_fields,
-                    place_fields = self.__place_fields,
-                    poll_fields = self.__poll_fields,
-                    tweet_fields = self.__tweet_fields,
-                    user_fields = self.__user_fields,
-                    expansions = self.__expansions)
-
-
-class Crawler(Thread):
-    """ Run listener in thread """
-
-    def __init__(self, bearer_token: str, save_func: Callable,
-                 log_func: Callable):
-        """ Keyword arguments:
-        bearer_token -- bearer token information
-        save_func -- thread-safe function to write tweet to file
-        log_func -- thread-safe function to write to log
-        """
-        Thread.__init__(self)
-        self.__bearer_token = bearer_token
-        self.__saveFunc = save_func
-        self.__logFunc = log_func
-
-    def run(self):
-        cs = CrawlerStream(self.__bearer_token,
-                           self.__saveFunc,
-                           self.__logFunc)
-        # Filter geo enabled Tweets
-        cs.start_sample()
+    def start_sample(self, threaded: bool = False):
+        self.sample(media_fields = FIELDS_MEDIA,
+                    place_fields = FIELDS_PLACE,
+                    poll_fields = FIELDS_POLL,
+                    tweet_fields = FIELDS_TWEET,
+                    user_fields = FIELDS_USER,
+                    expansions = FIELDS_EXPANSIONS,
+                    threaded = threaded)
 
 
 def get_time() -> bool:
@@ -555,14 +546,14 @@ if __name__ == "__main__":
             now_str = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
             content = f"Started at {now_str} on {host}"
             send_email(f"[TweetCrawler]: {content}", content)
+        cs = None
         try:
-            if __num_threads == 1:
-                cs = CrawlerStream(__twitter_bear_token, save_tweet, write_log)
-                cs.start_sample()
-            else:
-                for _ in range(__num_threads):
-                    Crawler(__twitter_bear_token, save_tweet, write_log).start()
+            cs = CrawlerStream(__twitter_bear_token, save_tweet, write_log)
+            for _ in range(__num_threads):
+                cs.start_sample(__num_threads > 1)
         except (KeyboardInterrupt, SystemExit):
+            if cs is not None:
+                cs.disconnect()
             close_all_files()
             if __log_file is not None:
                 __log_file.close()
