@@ -528,6 +528,10 @@ def worker(save_path: str) -> None:
             os.remove(f)  # Remove the flag file if the zip file does not exist
             cout(f"Cleaned {os.path.basename(f)}")
             files_cleaned.append(os.path.basename(f))
+        basef = zipf[:-4]
+        for ef in glob.glob(os.path.join(basef + "-[0-2][0-9]")):
+            if os.path.getsize(ef) == 0:
+                os.remove(ef)
     for f in sorted(glob.glob(
             os.path.join(save_path,
                          "tweets-"
